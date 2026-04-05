@@ -15,67 +15,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     // ADD NEW MEDICINE LOGIC
-    if ($action === 'create') {
-        $name = trim($_POST['name']);
-        $category = trim($_POST['category'] ?? 'General');
-        $stock = intval($_POST['stock']);
-        $min_stock = intval($_POST['min_stock'] ?? 10);
-        $expiry_date = $_POST['expiry_date'];
+  if ($action === 'create') {
+    $name = trim($_POST['name']);
+    $category = trim($_POST['category'] ?? 'General');
+    $subsidy_type = trim($_POST['subsidy_type'] ?? '');  // NEW
+    $stock = intval($_POST['stock']);
+    $min_stock = intval($_POST['min_stock'] ?? 10);
+    $expiry_date = $_POST['expiry_date'];
 
-        if ($name && $expiry_date) {
-            // Insert into Database securely
-            $stmt = $pdo->prepare("INSERT INTO medicines (name, category, stock, min_stock, expiry_date) VALUES (?, ?, ?, ?, ?)");
-            if ($stmt->execute([$name, $category, $stock, $min_stock, $expiry_date])) {
-                // Get the newly generated primary key of the medicine row
-                $medicine_id = $pdo->lastInsertId();
-                
-                // AUTOMATED AUDIT: Log this creation as an 'addition' transaction behind the scenes
-                logTransaction($pdo, $medicine_id, 'created', $stock, $_SESSION['user_id']);
-                $success = "Medicine added successfully.";
-            } else {
-                $error = "Failed to add medicine.";
-            }
+    // VALIDATION: Ensure subsidy_type is provided
+    if ($name && $expiry_date && !empty($subsidy_type)) {
+        // Insert into Database with subsidy_type
+        $stmt = $pdo->prepare("INSERT INTO medicines (name, category, subsidy_type, stock, min_stock, expiry_date) VALUES (?, ?, ?, ?, ?, ?)");
+        if ($stmt->execute([$name, $category, $subsidy_type, $stock, $min_stock, $expiry_date])) {
+            $medicine_id = $pdo->lastInsertId();
+            logTransaction($pdo, $medicine_id, 'created', $stock, $_SESSION['user_id']);
+            $success = "Medicine added successfully.";
         } else {
-            $error = "Name and Expiry Date are required.";
+            $error = "Failed to add medicine.";
         }
+    } else {
+        $error = "Name, Expiry Date, and Availability Type are required.";
+    }
+}
     } 
     // UPDATE EXISTING MEDICINE LOGIC
     elseif ($action === 'update') {
-        $id = intval($_POST['id']);
-        $name = trim($_POST['name']);
-        $category = trim($_POST['category'] ?? 'General');
-        $new_stock = intval($_POST['stock']);
-        $min_stock = intval($_POST['min_stock'] ?? 10);
-        $expiry_date = $_POST['expiry_date'];
+    $id = intval($_POST['id']);
+    $name = trim($_POST['name']);
+    $category = trim($_POST['category'] ?? 'General');
+    $subsidy_type = trim($_POST['subsidy_type'] ?? '');  // NEW
+    $new_stock = intval($_POST['stock']);
+    $min_stock = intval($_POST['min_stock'] ?? 10);
+    $expiry_date = $_POST['expiry_date'];
 
-        // PRE-FLIGHT CHECK: We must know the OLD stock to perfectly calculate the difference for the transaction logs
+    if (empty($subsidy_type)) {
+        $error = "Availability Type is required.";
+    } else {
         $stmt = $pdo->prepare("SELECT stock FROM medicines WHERE id = ?");
         $stmt->execute([$id]);
         $old_med = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($old_med) {
             $old_stock = intval($old_med['stock']);
-            $diff = $new_stock - $old_stock; // The mathematical shift in physical stock
+            $diff = $new_stock - $old_stock;
 
-            // Execute the physical update to the core inventory table
-            $stmt = $pdo->prepare("UPDATE medicines SET name = ?, category = ?, stock = ?, min_stock = ?, expiry_date = ? WHERE id = ?");
-            if ($stmt->execute([$name, $category, $new_stock, $min_stock, $expiry_date, $id])) {
-                
-                // SMART AUDIT TRAIL ROUTING
+            // Update with subsidy_type
+            $stmt = $pdo->prepare("UPDATE medicines SET name = ?, category = ?, subsidy_type = ?, stock = ?, min_stock = ?, expiry_date = ? WHERE id = ?");
+            if ($stmt->execute([$name, $category, $subsidy_type, $new_stock, $min_stock, $expiry_date, $id])) {
+                // Smart audit trail routing...
                 if ($diff > 0) {
-                    // Stock increased -> Log as a positive 'addition'
                     logTransaction($pdo, $id, 'addition', $diff, $_SESSION['user_id']);
                 } elseif ($diff < 0) {
-                    // Stock decreased -> Log as a 'reduction' (use abs() to record the amount gracefully)
                     logTransaction($pdo, $id, 'reduction', abs($diff), $_SESSION['user_id']);
                 } else {
-                    // Stock is identical -> Admin likely only corrected the name or expiry date. Log as metadata 'adjustment'.
                     logTransaction($pdo, $id, 'adjustment', 0, $_SESSION['user_id']);
                 }
                 $success = "Medicine updated successfully.";
             }
         }
     }
+}
     // QUICK STOCK ADJUSTMENT
     elseif ($action === 'quick_stock') {
         $id = intval($_POST['id']);
@@ -109,7 +109,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $success = "Medicine deleted successfully.";
         }
     }
-}
 
 // FETCH ALL MEDICINES FOR DISPLAY: Orders chronologically by newest first
 $stmt = $pdo->query("SELECT * FROM medicines ORDER BY id DESC");
@@ -222,8 +221,9 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 <input type="text" name="name" class="form-control" value="<?php echo $edit_med ? htmlspecialchars($edit_med['name']) : ''; ?>" required>
                             </div>
 
+
                             <div class="form-group">
-                                <label class="form-label">Category</label>
+                                <label class="form-label">Medicine Category</label>
                                 <?php $cat = $edit_med ? $edit_med['category'] : 'General'; ?>
                                 <select name="category" class="form-control" required>
                                     <option value="General" <?php echo $cat === 'General' ? 'selected' : ''; ?>>General</option>
@@ -233,6 +233,17 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                     <option value="Vaccines" <?php echo $cat === 'Vaccines' ? 'selected' : ''; ?>>Vaccines</option>
                                 </select>
                             </div>
+
+                                <!-- NEW: Add Subsidy Type Field -->
+                                <div class="form-group">
+                                    <label class="form-label">Availability Type <span style="color: var(--danger);">*</span></label>
+                                    <?php $subsidy = $edit_med ? $edit_med['subsidy_type'] : ''; ?>
+                                    <select name="subsidy_type" class="form-control" required>
+                                        <option value="">-- Select Type --</option>
+                                        <option value="Free" <?php echo $subsidy === 'Free' ? 'selected' : ''; ?>>Free</option>
+                                        <option value="Subsidized" <?php echo $subsidy === 'Subsidized' ? 'selected' : ''; ?>>Subsidized</option>
+                                    </select>
+                                </div>
 
                             <div class="form-group">
                                 <label class="form-label">Current Stock</label>
@@ -268,9 +279,10 @@ if ($action === 'edit' && isset($_GET['id'])) {
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th class="sortable" data-sort="id" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> ID</th>
+                                       <th class="sortable" data-sort="id" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> ID</th>
                                         <th class="sortable" data-sort="name" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Name</th>
                                         <th class="sortable" data-sort="category" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Category</th>
+                                        <th class="sortable" data-sort="subsidy_type" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Type</th>
                                         <th class="sortable" data-sort="stock" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Stock</th>
                                         <th class="sortable" data-sort="expiry" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Expiry</th>
                                         <th style="text-align: right;">Actions</th>
@@ -279,9 +291,17 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 <tbody>
                                     <?php foreach($medicines as $med): ?>
                                     <tr>
-                                        <td class="text-muted">#<?php echo $med['id']; ?></td>
+                                         <td class="text-muted">#<?php echo $med['id']; ?></td>
                                         <td class="font-medium text-main"><?php echo htmlspecialchars($med['name']); ?></td>
-                                        <td><span style="font-size: 0.8rem; background: var(--surface-hover); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border-color);"><?php echo htmlspecialchars($med['category']); ?></span></td>
+                                        <td><span style="font-size: 0.8rem; background: var(--surface-hover); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border-color);">
+                                            <?php echo htmlspecialchars($med['category']); ?>
+                                        </span></td>
+                                        <!-- NEW: Subsidy Type Column -->
+                                        <td>
+                                            <span style="font-size: 0.8rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : ($med['subsidy_type'] === 'Subsidized' ? '#FEF3C7' : '#F0F0F0'); ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : ($med['subsidy_type'] === 'Subsidized' ? '#92400E' : '#666'); ?>; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : ($med['subsidy_type'] === 'Subsidized' ? '#FBBF24' : '#ddd'); ?>;">
+                                                <?php echo htmlspecialchars($med['subsidy_type'] ?? 'Not Set'); ?>
+                                            </span>
+                                        </td>
                                         <td>
                                             <form method="POST" action="medicines.php" style="display: flex; align-items: center; gap: 0.5rem;">
                                                 <input type="hidden" name="action" value="quick_stock">

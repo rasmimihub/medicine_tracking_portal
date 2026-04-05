@@ -264,10 +264,19 @@ $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                             <i class="fas fa-capsules"></i>
                                         </div>
                                         <div>
-                                            <div class="font-bold medicine-name text-2xl" style="font-size:1rem;color:var(--text-main);"><?php echo htmlspecialchars($med['name']); ?></div>
-                                            <div style="margin-top: 0.25rem;">
-                                                <span class="medicine-category" style="font-size: 0.75rem; background: var(--surface-hover); padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-muted);"><?php echo htmlspecialchars($med['category']); ?></span>
-                                            </div>
+                                        <div class="font-bold medicine-name text-2xl" style="font-size:1rem;color:var(--text-main);"><?php echo htmlspecialchars($med['name']); ?></div>
+                                        <div style="margin-top: 0.25rem;">
+                                            <span class="medicine-category" style="font-size: 0.75rem; background: var(--surface-hover); padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-muted);">
+                                                <?php echo htmlspecialchars($med['category']); ?>
+                                            </span>
+                                            <!-- NEW: Show Subsidy Type -->
+                                            <?php if($med['subsidy_type']): ?>
+                                                <span style="font-size: 0.75rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : '#FEF3C7'; ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : '#92400E'; ?>; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : '#FBBF24'; ?>; margin-left: 0.5rem;">
+                                                    <?php echo htmlspecialchars($med['subsidy_type']); ?>
+                                                </span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
                                             <!-- Mobile Status -->
                                             <div class="mobile-status">
                                                 <span class="badge <?php echo $badgeClass; ?>">
