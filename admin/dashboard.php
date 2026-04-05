@@ -89,6 +89,7 @@ $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <!-- Main Content -->
     <main class="main-content">
+        <div class="content-wrapper">
         <!-- Header -->
         <header class="mb-6">
             <h1 class="text-2xl font-semibold">Dashboard Overview</h1>
@@ -193,6 +194,7 @@ $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
             </div>
 
+        </div>
         </div>
     </main>
 

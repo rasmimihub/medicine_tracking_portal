@@ -15,78 +15,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     // ADD NEW MEDICINE LOGIC
-  if ($action === 'create') {
-    $name = trim($_POST['name']);
-    $category = trim($_POST['category'] ?? 'General');
-    $subsidy_type = trim($_POST['subsidy_type'] ?? '');  // NEW
-    $stock = intval($_POST['stock']);
-    $min_stock = intval($_POST['min_stock'] ?? 10);
-    $expiry_date = $_POST['expiry_date'];
+    if ($action === 'create') {
+        $name = trim($_POST['name']);
+        $category = trim($_POST['category'] ?? 'General');
+        $subsidy_type = trim($_POST['subsidy_type'] ?? '');
+        $stock = intval($_POST['stock']);
+        $min_stock = intval($_POST['min_stock'] ?? 10);
+        $expiry_date = $_POST['expiry_date'];
 
-    // VALIDATION: Ensure subsidy_type is provided
-    if ($name && $expiry_date && !empty($subsidy_type)) {
-        // Insert into Database with subsidy_type
-        $stmt = $pdo->prepare("INSERT INTO medicines (name, category, subsidy_type, stock, min_stock, expiry_date) VALUES (?, ?, ?, ?, ?, ?)");
-        if ($stmt->execute([$name, $category, $subsidy_type, $stock, $min_stock, $expiry_date])) {
-            $medicine_id = $pdo->lastInsertId();
-            logTransaction($pdo, $medicine_id, 'created', $stock, $_SESSION['user_id']);
-            $success = "Medicine added successfully.";
+        if ($name && $expiry_date && !empty($subsidy_type)) {
+            $stmt = $pdo->prepare("INSERT INTO medicines (name, category, subsidy_type, stock, min_stock, expiry_date) VALUES (?, ?, ?, ?, ?, ?)");
+            if ($stmt->execute([$name, $category, $subsidy_type, $stock, $min_stock, $expiry_date])) {
+                $medicine_id = $pdo->lastInsertId();
+                logTransaction($pdo, $medicine_id, 'created', $stock, $_SESSION['user_id']);
+                $success = "Medicine added successfully.";
+            } else {
+                $error = "Failed to add medicine.";
+            }
         } else {
-            $error = "Failed to add medicine.";
+            $error = "Name, Expiry Date, and Availability Type are required.";
         }
-    } else {
-        $error = "Name, Expiry Date, and Availability Type are required.";
     }
-}
-    } 
     // UPDATE EXISTING MEDICINE LOGIC
     elseif ($action === 'update') {
-    $id = intval($_POST['id']);
-    $name = trim($_POST['name']);
-    $category = trim($_POST['category'] ?? 'General');
-    $subsidy_type = trim($_POST['subsidy_type'] ?? '');  // NEW
-    $new_stock = intval($_POST['stock']);
-    $min_stock = intval($_POST['min_stock'] ?? 10);
-    $expiry_date = $_POST['expiry_date'];
+        $id = intval($_POST['id']);
+        $name = trim($_POST['name']);
+        $category = trim($_POST['category'] ?? 'General');
+        $subsidy_type = trim($_POST['subsidy_type'] ?? '');
+        $new_stock = intval($_POST['stock']);
+        $min_stock = intval($_POST['min_stock'] ?? 10);
+        $expiry_date = $_POST['expiry_date'];
 
-    if (empty($subsidy_type)) {
-        $error = "Availability Type is required.";
-    } else {
-        $stmt = $pdo->prepare("SELECT stock FROM medicines WHERE id = ?");
-        $stmt->execute([$id]);
-        $old_med = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (empty($subsidy_type)) {
+            $error = "Availability Type is required.";
+        } else {
+            $stmt = $pdo->prepare("SELECT stock FROM medicines WHERE id = ?");
+            $stmt->execute([$id]);
+            $old_med = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($old_med) {
-            $old_stock = intval($old_med['stock']);
-            $diff = $new_stock - $old_stock;
+            if ($old_med) {
+                $old_stock = intval($old_med['stock']);
+                $diff = $new_stock - $old_stock;
 
-            // Update with subsidy_type
-            $stmt = $pdo->prepare("UPDATE medicines SET name = ?, category = ?, subsidy_type = ?, stock = ?, min_stock = ?, expiry_date = ? WHERE id = ?");
-            if ($stmt->execute([$name, $category, $subsidy_type, $new_stock, $min_stock, $expiry_date, $id])) {
-                // Smart audit trail routing...
-                if ($diff > 0) {
-                    logTransaction($pdo, $id, 'addition', $diff, $_SESSION['user_id']);
-                } elseif ($diff < 0) {
-                    logTransaction($pdo, $id, 'reduction', abs($diff), $_SESSION['user_id']);
-                } else {
-                    logTransaction($pdo, $id, 'adjustment', 0, $_SESSION['user_id']);
+                $stmt = $pdo->prepare("UPDATE medicines SET name = ?, category = ?, subsidy_type = ?, stock = ?, min_stock = ?, expiry_date = ? WHERE id = ?");
+                if ($stmt->execute([$name, $category, $subsidy_type, $new_stock, $min_stock, $expiry_date, $id])) {
+                    if ($diff > 0) {
+                        logTransaction($pdo, $id, 'addition', $diff, $_SESSION['user_id']);
+                    } elseif ($diff < 0) {
+                        logTransaction($pdo, $id, 'reduction', abs($diff), $_SESSION['user_id']);
+                    } else {
+                        logTransaction($pdo, $id, 'adjustment', 0, $_SESSION['user_id']);
+                    }
+                    $success = "Medicine updated successfully.";
                 }
-                $success = "Medicine updated successfully.";
             }
         }
     }
-}
     // QUICK STOCK ADJUSTMENT
     elseif ($action === 'quick_stock') {
         $id = intval($_POST['id']);
-        $change = intval($_POST['change']); // +1, -1, etc.
+        $change = intval($_POST['change']);
         
         $stmt = $pdo->prepare("SELECT stock FROM medicines WHERE id = ?");
         $stmt->execute([$id]);
         $old_med = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($old_med) {
-            $new_stock = max(0, $old_med['stock'] + $change); // Prevent negative stock
+            $new_stock = max(0, $old_med['stock'] + $change);
             $diff = $new_stock - $old_med['stock'];
             
             if ($diff != 0) {
@@ -98,25 +93,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
-    } 
+    }
     // DELETE MEDICINE LOGIC
     elseif ($action === 'delete') {
         $id = intval($_POST['id']);
-        // The foreign key constraint in our database uses ON DELETE CASCADE.
-        // Therefore, deleting the medicine automatically drops its associated logs in the transactions table.
         $stmt = $pdo->prepare("DELETE FROM medicines WHERE id = ?");
         if ($stmt->execute([$id])) {
             $success = "Medicine deleted successfully.";
         }
     }
+}
 
-// FETCH ALL MEDICINES FOR DISPLAY: Orders chronologically by newest first
-$stmt = $pdo->query("SELECT * FROM medicines ORDER BY id DESC");
+// ============ PAGINATION LOGIC ============
+$items_per_page = 10;
+$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($current_page - 1) * $items_per_page;
+
+// Get total count
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM medicines");
+$total_medicines = $stmt->fetchColumn();
+$total_pages = ceil($total_medicines / $items_per_page);
+
+// Ensure current page doesn't exceed total pages
+if ($current_page > $total_pages && $total_pages > 0) {
+    $current_page = $total_pages;
+    $offset = ($current_page - 1) * $items_per_page;
+}
+
+// FETCH MEDICINES FOR CURRENT PAGE
+$stmt = $pdo->prepare("SELECT * FROM medicines ORDER BY id DESC LIMIT ? OFFSET ?");
+$stmt->bindValue(1, $items_per_page, PDO::PARAM_INT);
+$stmt->bindValue(2, $offset, PDO::PARAM_INT);
+$stmt->execute();
 $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// EDIT MODE PRE-FILL TRIGGER: 
-// If an admin clicks the "Edit" button matching a URL parameter (e.g. ?action=edit&id=5)
-// This block fetches that exact medicine's existing data so the HTML form below is pre-filled.
+// EDIT MODE PRE-FILL TRIGGER
 $edit_med = null;
 if ($action === 'edit' && isset($_GET['id'])) {
     $id = intval($_GET['id']);
@@ -143,6 +154,49 @@ if ($action === 'edit' && isset($_GET['id'])) {
             .grid-layout {
                 grid-template-columns: 350px 1fr;
             }
+        }
+        
+        /* Pagination Styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        .pagination a, .pagination span {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-decoration: none;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .pagination a:hover {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .pagination span.active {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            font-weight: 600;
+        }
+        .pagination span.disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .page-info {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
         }
     </style>
 </head>
@@ -172,7 +226,9 @@ if ($action === 'edit' && isset($_GET['id'])) {
         </nav>
         <div class="p-4" style="border-top: 1px solid var(--border-color);">
             <div class="flex items-center gap-2">
-                <div style="width: 2rem; height: 2rem; border-radius: 50%; background-color: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.875rem;">A</div>
+                <div style="width: 2rem; height: 2rem; border-radius: 50%; background-color: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600;">
+                    A
+                </div>
                 <div>
                     <p class="text-sm font-medium" style="margin: 0; line-height: 1.2;">Admin User</p>
                     <p class="text-xs text-muted" style="margin: 0;">Pharmacist</p>
@@ -183,6 +239,7 @@ if ($action === 'edit' && isset($_GET['id'])) {
 
     <!-- Main Content -->
     <main class="main-content">
+        <div class="content-wrapper">
         <header class="mb-6">
             <h1 class="text-2xl font-semibold">Medicines Directory</h1>
         </header>
@@ -221,7 +278,6 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 <input type="text" name="name" class="form-control" value="<?php echo $edit_med ? htmlspecialchars($edit_med['name']) : ''; ?>" required>
                             </div>
 
-
                             <div class="form-group">
                                 <label class="form-label">Medicine Category</label>
                                 <?php $cat = $edit_med ? $edit_med['category'] : 'General'; ?>
@@ -234,16 +290,15 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 </select>
                             </div>
 
-                                <!-- NEW: Add Subsidy Type Field -->
-                                <div class="form-group">
-                                    <label class="form-label">Availability Type <span style="color: var(--danger);">*</span></label>
-                                    <?php $subsidy = $edit_med ? $edit_med['subsidy_type'] : ''; ?>
-                                    <select name="subsidy_type" class="form-control" required>
-                                        <option value="">-- Select Type --</option>
-                                        <option value="Free" <?php echo $subsidy === 'Free' ? 'selected' : ''; ?>>Free</option>
-                                        <option value="Subsidized" <?php echo $subsidy === 'Subsidized' ? 'selected' : ''; ?>>Subsidized</option>
-                                    </select>
-                                </div>
+                            <div class="form-group">
+                                <label class="form-label">Availability Type <span style="color: var(--danger);">*</span></label>
+                                <?php $subsidy = $edit_med ? $edit_med['subsidy_type'] : ''; ?>
+                                <select name="subsidy_type" class="form-control" required>
+                                    <option value="">-- Select Type --</option>
+                                    <option value="Free" <?php echo $subsidy === 'Free' ? 'selected' : ''; ?>>Free</option>
+                                    <option value="Subsidized" <?php echo $subsidy === 'Subsidized' ? 'selected' : ''; ?>>Subsidized</option>
+                                </select>
+                            </div>
 
                             <div class="form-group">
                                 <label class="form-label">Current Stock</label>
@@ -275,11 +330,16 @@ if ($action === 'edit' && isset($_GET['id'])) {
                 <!-- Table Area -->
                 <div>
                     <div class="card">
+                        <!-- Page Info -->
+                        <div class="page-info">
+                            Showing <?php echo ($medicines ? $offset + 1 : 0); ?> to <?php echo min($offset + $items_per_page, $total_medicines); ?> of <?php echo $total_medicines; ?> medicines
+                        </div>
+
                         <div class="table-responsive">
                             <table class="table">
                                 <thead>
                                     <tr>
-                                       <th class="sortable" data-sort="id" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> ID</th>
+                                        <th class="sortable" data-sort="id" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> ID</th>
                                         <th class="sortable" data-sort="name" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Name</th>
                                         <th class="sortable" data-sort="category" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Category</th>
                                         <th class="sortable" data-sort="subsidy_type" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> Type</th>
@@ -291,14 +351,13 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 <tbody>
                                     <?php foreach($medicines as $med): ?>
                                     <tr>
-                                         <td class="text-muted">#<?php echo $med['id']; ?></td>
+                                        <td class="text-muted">#<?php echo $med['id']; ?></td>
                                         <td class="font-medium text-main"><?php echo htmlspecialchars($med['name']); ?></td>
                                         <td><span style="font-size: 0.8rem; background: var(--surface-hover); padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid var(--border-color);">
                                             <?php echo htmlspecialchars($med['category']); ?>
                                         </span></td>
-                                        <!-- NEW: Subsidy Type Column -->
                                         <td>
-                                            <span style="font-size: 0.8rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : ($med['subsidy_type'] === 'Subsidized' ? '#FEF3C7' : '#F0F0F0'); ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : ($med['subsidy_type'] === 'Subsidized' ? '#92400E' : '#666'); ?>; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : ($med['subsidy_type'] === 'Subsidized' ? '#FBBF24' : '#ddd'); ?>;">
+                                            <span style="font-size: 0.8rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : '#FEF3C7'; ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : '#92400E'; ?>; padding: 0.2rem 0.5rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : '#FBBF24'; ?>;">
                                                 <?php echo htmlspecialchars($med['subsidy_type'] ?? 'Not Set'); ?>
                                             </span>
                                         </td>
@@ -307,21 +366,20 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                                 <input type="hidden" name="action" value="quick_stock">
                                                 <input type="hidden" name="id" value="<?php echo $med['id']; ?>">
                                                 
-                                                <button type="submit" name="change" value="-1" class="btn" style="padding: 0 0.4rem; height: 24px; font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border-color); color: var(--text-main);">-</button>
+                                                <button type="submit" name="change" value="-1" class="btn" style="padding: 0 0.4rem; height: 24px; font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">-</button>
                                                 
                                                 <?php 
-                                                // Determine styles dynamically inline here to ensure styling portability
-                                                $stockBadgeStyle = "padding: 0.25rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; min-width: 35px; text-align: center; ";
-                                                $min_stock = $med['min_stock'];
-                                                if ($med['stock'] > $min_stock * 2) $stockBadgeStyle .= "background-color: #ECFDF5; color: #065F46; border: 1px solid #34D399;";
-                                                else if ($med['stock'] > $min_stock) $stockBadgeStyle .= "background-color: #FEF3C7; color: #92400E; border: 1px solid #FBBF24;";
-                                                else $stockBadgeStyle .= "background-color: #FEF2F2; color: #991B1B; border: 1px solid #F87171;";
+                                                    $stockBadgeStyle = "padding: 0.25rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; min-width: 35px; text-align: center; ";
+                                                    $min_stock = $med['min_stock'];
+                                                    if ($med['stock'] > $min_stock * 2) $stockBadgeStyle .= "background-color: #ECFDF5; color: #065F46; border: 1px solid #34D399;";
+                                                    else if ($med['stock'] > $min_stock) $stockBadgeStyle .= "background-color: #FEF3C7; color: #92400E; border: 1px solid #FBBF24;";
+                                                    else $stockBadgeStyle .= "background-color: #FEF2F2; color: #991B1B; border: 1px solid #F87171;";
                                                 ?>
                                                 <span style="<?php echo $stockBadgeStyle; ?>" title="Min allowed: <?php echo $min_stock; ?>">
                                                     <?php echo $med['stock']; ?>
                                                 </span>
 
-                                                <button type="submit" name="change" value="1" class="btn" style="padding: 0 0.4rem; height: 24px; font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border-color); color: var(--text-main);">+</button>
+                                                <button type="submit" name="change" value="1" class="btn" style="padding: 0 0.4rem; height: 24px; font-size: 0.8rem; background: var(--surface-hover); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;">+</button>
                                             </form>
                                         </td>
                                         <td class="text-muted"><?php echo date('M d, Y', strtotime($med['expiry_date'])); ?></td>
@@ -338,10 +396,70 @@ if ($action === 'edit' && isset($_GET['id'])) {
                                 </tbody>
                             </table>
                         </div>
+
+                        <!-- ============ PAGINATION BUTTONS ============ -->
+                        <div class="pagination">
+                            <!-- First & Previous -->
+                            <?php if($current_page > 1): ?>
+                                <a href="medicines.php?page=1" title="First Page">
+                                    <i class="fas fa-angle-double-left"></i>
+                                </a>
+                                <a href="medicines.php?page=<?php echo $current_page - 1; ?>" title="Previous Page">
+                                    <i class="fas fa-angle-left"></i> Previous
+                                </a>
+                            <?php else: ?>
+                                <span class="disabled" title="First Page">
+                                    <i class="fas fa-angle-double-left"></i>
+                                </span>
+                                <span class="disabled" title="Previous Page">
+                                    <i class="fas fa-angle-left"></i> Previous
+                                </span>
+                            <?php endif; ?>
+
+                            <!-- Page Numbers -->
+                            <?php 
+                                $start_page = max(1, $current_page - 2);
+                                $end_page = min($total_pages, $current_page + 2);
+                                
+                                if($start_page > 1): ?>
+                                    <span>...</span>
+                                <?php endif;
+                                
+                                for($p = $start_page; $p <= $end_page; $p++): 
+                                    if($p == $current_page): ?>
+                                        <span class="active"><?php echo $p; ?></span>
+                                    <?php else: ?>
+                                        <a href="medicines.php?page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                                    <?php endif;
+                                endfor;
+                                
+                                if($end_page < $total_pages): ?>
+                                    <span>...</span>
+                                <?php endif; ?>
+
+                            <!-- Next & Last -->
+                            <?php if($current_page < $total_pages): ?>
+                                <a href="medicines.php?page=<?php echo $current_page + 1; ?>" title="Next Page">
+                                    Next <i class="fas fa-angle-right"></i>
+                                </a>
+                                <a href="medicines.php?page=<?php echo $total_pages; ?>" title="Last Page">
+                                    <i class="fas fa-angle-double-right"></i>
+                                </a>
+                            <?php else: ?>
+                                <span class="disabled" title="Next Page">
+                                    Next <i class="fas fa-angle-right"></i>
+                                </span>
+                                <span class="disabled" title="Last Page">
+                                    <i class="fas fa-angle-double-right"></i>
+                                </span>
+                            <?php endif; ?>
+                        </div>
+
                     </div>
                 </div>
             </div>
 
+        </div>
         </div>
     </main>
 

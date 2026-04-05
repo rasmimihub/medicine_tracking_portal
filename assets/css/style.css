@@ -452,6 +452,20 @@ h1, h2, h3, h4, h5, h6 {
 .bg-white { background-color: var(--surface); }
 .hidden { display: none; }
 
+.content-wrapper {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 90%;
+  padding: 0 1rem;
+}
+
+/* Update main-content */
+.main-content {
+  flex: 1;
+  background-color: var(--bg-color);
+  padding: 2rem 1rem;
+  overflow-y: auto;
+}
 /* Print Styles */
 @media print {
   .sidebar, .navbar, .form-group, .btn, #logSearch, header button {
