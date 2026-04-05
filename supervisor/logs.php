@@ -4,21 +4,23 @@ require_once '../config.php';
 require_once '../auth.php';
 requireRole('supervisor');
 
-// FETCH ALL TRANSACTIONS (AUDIT LOG):
-// This massive query joins the 'transactions' table with 'medicines' and 'users'
-// to reconstruct the complete historical narrative. Even if a user or medicine is deleted,
-// the main transaction row survives (the LEFT JOIN will simply return NULL/empty for the name).
-// PAGINATION LOGIC:
-$limit = 50;
-$page = isset($_GET['page']) && is_numeric($_GET['page']) ? intval($_GET['page']) : 1;
-if ($page < 1) $page = 1;
-$offset = ($page - 1) * $limit;
+// ============ PAGINATION LOGIC ============
+$items_per_page = 15;  // Changed from 50 to 15 for better readability
+$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($current_page - 1) * $items_per_page;
 
-// Get total for calculations
-$total_stmt = $pdo->query("SELECT COUNT(*) FROM transactions");
-$total_logs = $total_stmt->fetchColumn();
-$total_pages = ceil($total_logs / $limit);
+// Get total count
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM transactions");
+$total_logs = $stmt->fetchColumn();
+$total_pages = ceil($total_logs / $items_per_page);
 
+// Ensure current page doesn't exceed total pages
+if ($current_page > $total_pages && $total_pages > 0) {
+    $current_page = $total_pages;
+    $offset = ($current_page - 1) * $items_per_page;
+}
+
+// FETCH TRANSACTIONS WITH PAGINATION
 $stmt = $pdo->prepare("
     SELECT t.*, m.name as medicine_name, u.username as user_name 
     FROM transactions t
@@ -27,7 +29,7 @@ $stmt = $pdo->prepare("
     ORDER BY t.timestamp DESC
     LIMIT :limit OFFSET :offset
 ");
-$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+$stmt->bindValue(':limit', $items_per_page, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -40,6 +42,79 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <title>Audit Logs - Supervisor Portal</title>
     <link href="../assets/css/style.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Pagination Styles */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        
+        .pagination a, .pagination span {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-decoration: none;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+        
+        .pagination a:hover {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        
+        .pagination span.active {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            font-weight: 600;
+        }
+        
+        .pagination span.disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        
+        .page-info {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            padding: 1rem;
+            background-color: var(--surface-hover);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .logs-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .pagination {
+                justify-content: flex-start;
+            }
+        }
+    </style>
 </head>
 <body class="dashboard-layout">
     
@@ -67,7 +142,9 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </nav>
         <div class="p-4" style="border-top: 1px solid var(--border-color);">
             <div class="flex items-center gap-2">
-                <div style="width: 2rem; height: 2rem; border-radius: 50%; background-color: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.875rem;">S</div>
+                <div style="width: 2rem; height: 2rem; border-radius: 50%; background-color: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600;">
+                    S
+                </div>
                 <div>
                     <p class="text-sm font-medium" style="margin: 0; line-height: 1.2;">Supervisor User</p>
                     <p class="text-xs text-muted" style="margin: 0;">Auditor</p>
@@ -78,17 +155,28 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <!-- Main Content -->
     <main class="main-content">
-        <header class="mb-6 flex justify-between items-center" style="display: flex; justify-content: space-between; align-items: center;">
-            <h1 class="text-2xl font-semibold">Complete Audit Logs</h1>
+        <div class="logs-header">
+            <div>
+                <h1 class="text-2xl font-semibold">Complete Audit Logs</h1>
+                <p class="text-sm text-muted" style="margin-top: 0.5rem;">Total Transactions: <strong><?php echo $total_logs; ?></strong></p>
+            </div>
             <button onclick="window.print()" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.5rem; background-color: white;">
                 <i class="fas fa-print"></i> Print / Save as PDF
             </button>
-        </header>
+        </div>
 
         <div class="card">
+            <!-- Search Bar -->
             <div class="p-4" style="border-bottom: 1px solid var(--border-color); background-color: var(--surface-hover);">
-                <input type="text" id="logSearch" placeholder="Search logs by medicine or user..." class="form-control" style="max-width: 400px;">
+                <input type="text" id="logSearch" placeholder="Search logs by medicine or user..." class="form-control" style="max-width: 500px;">
             </div>
+
+            <!-- Page Info -->
+            <div class="page-info">
+                Showing <?php echo ($logs ? $offset + 1 : 0); ?> to <?php echo min($offset + $items_per_page, $total_logs); ?> of <?php echo $total_logs; ?> transactions
+            </div>
+
+            <!-- Table -->
             <div class="table-responsive">
                 <table class="table" id="logTable">
                     <thead>
@@ -102,56 +190,121 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach($logs as $log): ?>
-                            <?php
-                                $typeBadgeStyle = "padding: 0.25rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; ";
-                                if ($log['type'] === 'addition') $typeBadgeStyle .= 'background-color: #ECFDF5; color: #065F46; border: 1px solid #34D399;';
-                                else if ($log['type'] === 'reduction') $typeBadgeStyle .= 'background-color: #FEF2F2; color: #991B1B; border: 1px solid #F87171;';
-                                else if ($log['type'] === 'created') $typeBadgeStyle .= 'background-color: #EFF6FF; color: #1E40AF; border: 1px solid #60A5FA;';
-                                else $typeBadgeStyle .= 'background-color: #F3F4F6; color: #1F2937; border: 1px solid #D1D5DB;';
-                            ?>
-                        <tr class="log-row">
-                            <td class="text-muted">#<?php echo $log['id']; ?></td>
-                            <td class="text-muted"><?php echo date('Y-m-d H:i:s', strtotime($log['timestamp'])); ?></td>
-                            <td class="font-medium log-user"><?php echo htmlspecialchars($log['user_name'] ?? 'System/Deleted'); ?></td>
-                            <td>
-                                <span style="<?php echo $typeBadgeStyle; ?>">
-                                    <?php echo ucfirst($log['type']); ?>
-                                </span>
-                            </td>
-                            <td class="log-medicine"><?php echo htmlspecialchars($log['medicine_name'] ?? 'Unknown/Deleted (ID: '.$log['medicine_id'].')'); ?></td>
-                            <td class="font-bold">
-                                <?php 
-                                    if ($log['type'] == 'reduction') echo "<span style='color: var(--danger);'>-{$log['quantity']}</span>";
-                                    else if ($log['type'] == 'addition' || $log['type'] == 'created') echo "<span style='color: var(--secondary);'>+{$log['quantity']}</span>";
-                                    else echo $log['quantity'];
-                                ?>
+                        <?php if(empty($logs)): ?>
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 2rem;">
+                                <i class="fas fa-inbox" style="font-size: 2rem; color: var(--border-color); margin-bottom: 1rem; display: block;"></i>
+                                <p style="color: var(--text-muted);">No audit logs available.</p>
                             </td>
                         </tr>
-                        <?php endforeach; ?>
+                        <?php else: ?>
+                            <?php foreach($logs as $log): ?>
+                                <?php
+                                    $typeBadgeStyle = "padding: 0.25rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; ";
+                                    if ($log['type'] === 'addition') $typeBadgeStyle .= 'background-color: #ECFDF5; color: #065F46; border: 1px solid #34D399;';
+                                    else if ($log['type'] === 'reduction') $typeBadgeStyle .= 'background-color: #FEF2F2; color: #991B1B; border: 1px solid #F87171;';
+                                    else if ($log['type'] === 'created') $typeBadgeStyle .= 'background-color: #EFF6FF; color: #1E40AF; border: 1px solid #60A5FA;';
+                                    else if ($log['type'] === 'deleted') $typeBadgeStyle .= 'background-color: #F3F4F6; color: #991B1B; border: 1px solid #D1D5DB;';
+                                    else $typeBadgeStyle .= 'background-color: #F3F4F6; color: #1F2937; border: 1px solid #D1D5DB;';
+                                ?>
+                            <tr class="log-row">
+                                <td class="text-muted" style="font-weight: 600;">#<?php echo $log['id']; ?></td>
+                                <td class="text-muted" style="font-size: 0.9rem;">
+                                    <div><?php echo date('M d, Y', strtotime($log['timestamp'])); ?></div>
+                                    <div style="font-size: 0.85rem; color: #9CA3AF;"><?php echo date('H:i:s', strtotime($log['timestamp'])); ?></div>
+                                </td>
+                                <td class="font-medium log-user">
+                                    <i class="fas fa-user-circle" style="margin-right: 0.5rem; color: var(--primary);"></i>
+                                    <?php echo htmlspecialchars($log['user_name'] ?? 'System/Deleted'); ?>
+                                </td>
+                                <td>
+                                    <span style="<?php echo $typeBadgeStyle; ?>">
+                                        <i class="fas fa-<?php 
+                                            if($log['type'] === 'addition') echo 'plus';
+                                            elseif($log['type'] === 'reduction') echo 'minus';
+                                            elseif($log['type'] === 'created') echo 'plus-circle';
+                                            elseif($log['type'] === 'deleted') echo 'trash';
+                                            else echo 'edit';
+                                        ?>"></i> <?php echo ucfirst($log['type']); ?>
+                                    </span>
+                                </td>
+                                <td class="log-medicine">
+                                    <i class="fas fa-pills" style="margin-right: 0.5rem; color: var(--secondary);"></i>
+                                    <?php echo htmlspecialchars($log['medicine_name'] ?? 'Unknown/Deleted (ID: '.$log['medicine_id'].')'); ?>
+                                </td>
+                                <td class="font-bold">
+                                    <?php 
+                                        if ($log['type'] == 'reduction') echo "<span style='color: var(--danger);'><i class='fas fa-arrow-down'></i> {$log['quantity']}</span>";
+                                        else if ($log['type'] == 'addition' || $log['type'] == 'created') echo "<span style='color: var(--secondary);'><i class='fas fa-arrow-up'></i> {$log['quantity']}</span>";
+                                        else echo "<span>{$log['quantity']}</span>";
+                                    ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
-            
-            <!-- Pagination Controls -->
-            <div class="p-4" style="border-top: 1px solid var(--border-color); background-color: var(--surface); display: flex; align-items: center; justify-content: space-between;">
-                <div class="text-sm text-muted">
-                    Showing <?php echo $total_logs > 0 ? $offset + 1 : 0; ?> to <?php echo min($offset + $limit, $total_logs); ?> of <?php echo $total_logs; ?> logs
-                </div>
-                <div style="display: flex; gap: 0.5rem;">
-                    <?php if ($page > 1): ?>
-                        <a href="?page=<?php echo $page - 1; ?>" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.875rem;">Previous</a>
-                    <?php else: ?>
-                        <button class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.875rem; opacity: 0.5; cursor: not-allowed;" disabled>Previous</button>
-                    <?php endif; ?>
+
+            <!-- ============ ENHANCED PAGINATION BUTTONS ============ -->
+            <?php if($total_pages > 1): ?>
+            <div class="pagination">
+                <!-- First & Previous -->
+                <?php if($current_page > 1): ?>
+                    <a href="logs.php?page=1" title="First Page">
+                        <i class="fas fa-angle-double-left"></i>
+                    </a>
+                    <a href="logs.php?page=<?php echo $current_page - 1; ?>" title="Previous Page">
+                        <i class="fas fa-angle-left"></i> Previous
+                    </a>
+                <?php else: ?>
+                    <span class="disabled" title="First Page">
+                        <i class="fas fa-angle-double-left"></i>
+                    </span>
+                    <span class="disabled" title="Previous Page">
+                        <i class="fas fa-angle-left"></i> Previous
+                    </span>
+                <?php endif; ?>
+
+                <!-- Page Numbers -->
+                <?php 
+                    $start_page = max(1, $current_page - 2);
+                    $end_page = min($total_pages, $current_page + 2);
                     
-                    <?php if ($page < $total_pages): ?>
-                        <a href="?page=<?php echo $page + 1; ?>" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.875rem;">Next</a>
-                    <?php else: ?>
-                        <button class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.875rem; opacity: 0.5; cursor: not-allowed;" disabled>Next</button>
+                    if($start_page > 1): ?>
+                        <span>...</span>
+                    <?php endif;
+                    
+                    for($p = $start_page; $p <= $end_page; $p++): 
+                        if($p == $current_page): ?>
+                            <span class="active"><?php echo $p; ?></span>
+                        <?php else: ?>
+                            <a href="logs.php?page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                        <?php endif;
+                    endfor;
+                    
+                    if($end_page < $total_pages): ?>
+                        <span>...</span>
                     <?php endif; ?>
-                </div>
+
+                <!-- Next & Last -->
+                <?php if($current_page < $total_pages): ?>
+                    <a href="logs.php?page=<?php echo $current_page + 1; ?>" title="Next Page">
+                        Next <i class="fas fa-angle-right"></i>
+                    </a>
+                    <a href="logs.php?page=<?php echo $total_pages; ?>" title="Last Page">
+                        <i class="fas fa-angle-double-right"></i>
+                    </a>
+                <?php else: ?>
+                    <span class="disabled" title="Next Page">
+                        Next <i class="fas fa-angle-right"></i>
+                    </span>
+                    <span class="disabled" title="Last Page">
+                        <i class="fas fa-angle-double-right"></i>
+                    </span>
+                <?php endif; ?>
             </div>
+            <?php endif; ?>
         </div>
     </main>
 
@@ -162,6 +315,7 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             logSearch.addEventListener('input', (e) => {
                 const query = e.target.value.toLowerCase().trim();
+                let visibleCount = 0;
                 
                 logRows.forEach(row => {
                     const user = row.querySelector('.log-user').textContent.toLowerCase();
@@ -169,10 +323,24 @@ $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     
                     if (user.includes(query) || medicine.includes(query)) {
                         row.style.display = '';
+                        visibleCount++;
                     } else {
                         row.style.display = 'none';
                     }
                 });
+
+                // Show no results message
+                const noResultsRow = document.querySelector('.no-results');
+                if (visibleCount === 0 && logRows.length > 0) {
+                    if (!noResultsRow) {
+                        const table = document.querySelector('#logTable tbody');
+                        const row = table.insertRow();
+                        row.className = 'no-results';
+                        row.innerHTML = '<td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);"><i class="fas fa-search" style="font-size: 2rem; margin-bottom: 1rem; display: block;"></i><p>No logs matched your search criteria.</p></td>';
+                    }
+                } else if (noResultsRow) {
+                    noResultsRow.remove();
+                }
             });
         });
     </script>

@@ -3,11 +3,33 @@
 require_once 'config.php';
 require_once 'auth.php';
 
-// FETCH PUBLIC MEDICINES:
-// Get the entire current inventory that is NOT expired.
-// We purposely DO NOT select sensitive table data or expired drugs.
-$stmt = $pdo->query("SELECT * FROM medicines WHERE expiry_date >= CURDATE() ORDER BY name ASC");
+// ============ PAGINATION LOGIC ============
+$items_per_page = 10;
+$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($current_page - 1) * $items_per_page;
+
+// Get total count of non-expired medicines
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM medicines WHERE expiry_date >= CURDATE()");
+$total_medicines = $stmt->fetchColumn();
+$total_pages = ceil($total_medicines / $items_per_page);
+
+// Ensure current page doesn't exceed total pages
+if ($current_page > $total_pages && $total_pages > 0) {
+    $current_page = $total_pages;
+    $offset = ($current_page - 1) * $items_per_page;
+}
+
+// FETCH PUBLIC MEDICINES WITH PAGINATION:
+// Get the current page medicines that are NOT expired
+$stmt = $pdo->prepare("SELECT * FROM medicines WHERE expiry_date >= CURDATE() ORDER BY name ASC LIMIT ? OFFSET ?");
+$stmt->bindValue(1, $items_per_page, PDO::PARAM_INT);
+$stmt->bindValue(2, $offset, PDO::PARAM_INT);
+$stmt->execute();
 $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get all medicines for client-side filtering (optional: for small datasets)
+$stmt = $pdo->query("SELECT * FROM medicines WHERE expiry_date >= CURDATE() ORDER BY name ASC");
+$all_medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -139,6 +161,57 @@ $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
             margin-bottom: 1rem;
         }
 
+        /* ============ PAGINATION STYLES ============ */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        
+        .pagination a, .pagination span {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-decoration: none;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .pagination a:hover {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        
+        .pagination span.active {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            font-weight: 600;
+        }
+        
+        .pagination span.disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        
+        .page-info {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            padding: 1rem;
+            background-color: var(--surface-hover);
+            border-bottom: 1px solid var(--border-color);
+        }
+
         /* Responsive adjustments */
         @media (max-width: 640px) {
             .table thead {
@@ -231,6 +304,11 @@ $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
             </div>
 
+            <!-- Page Info -->
+            <div class="page-info">
+                Showing <?php echo ($medicines ? $offset + 1 : 0); ?> to <?php echo min($offset + $items_per_page, $total_medicines); ?> of <?php echo $total_medicines; ?> medicines
+            </div>
+
             <!-- Table section -->
             <div class="table-responsive">
                 <table class="table" id="medicineTable">
@@ -266,12 +344,12 @@ $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                         <div>
                                         <div class="font-bold medicine-name text-2xl" style="font-size:1rem;color:var(--text-main);"><?php echo htmlspecialchars($med['name']); ?></div>
                                         <div style="margin-top: 0.25rem;">
-                                            <span class="medicine-category" style="font-size: 0.75rem; background: var(--surface-hover); padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-muted);">
+                                            <span class="medicine-category" style="font-size: 0.75rem; background: var(--surface-hover); padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid var(--border-color);">
                                                 <?php echo htmlspecialchars($med['category']); ?>
                                             </span>
-                                            <!-- NEW: Show Subsidy Type -->
+                                            <!-- Show Subsidy Type -->
                                             <?php if($med['subsidy_type']): ?>
-                                                <span style="font-size: 0.75rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : '#FEF3C7'; ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : '#92400E'; ?>; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : '#FBBF24'; ?>; margin-left: 0.5rem;">
+                                                <span style="font-size: 0.75rem; background: <?php echo $med['subsidy_type'] === 'Free' ? '#ECFDF5' : '#FEF3C7'; ?>; color: <?php echo $med['subsidy_type'] === 'Free' ? '#065F46' : '#92400E'; ?>; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid <?php echo $med['subsidy_type'] === 'Free' ? '#34D399' : '#FBBF24'; ?> margin-left: 0.5rem;">
                                                     <?php echo htmlspecialchars($med['subsidy_type']); ?>
                                                 </span>
                                             <?php endif; ?>
@@ -304,6 +382,67 @@ $medicines = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <p>No medicines matched your search criteria.</p>
                 </div>
             </div>
+
+            <!-- ============ PAGINATION BUTTONS ============ -->
+            <?php if($total_pages > 1): ?>
+            <div class="pagination">
+                <!-- First & Previous -->
+                <?php if($current_page > 1): ?>
+                    <a href="index.php?page=1" title="First Page">
+                        <i class="fas fa-angle-double-left"></i>
+                    </a>
+                    <a href="index.php?page=<?php echo $current_page - 1; ?>" title="Previous Page">
+                        <i class="fas fa-angle-left"></i> Previous
+                    </a>
+                <?php else: ?>
+                    <span class="disabled" title="First Page">
+                        <i class="fas fa-angle-double-left"></i>
+                    </span>
+                    <span class="disabled" title="Previous Page">
+                        <i class="fas fa-angle-left"></i> Previous
+                    </span>
+                <?php endif; ?>
+
+                <!-- Page Numbers -->
+                <?php 
+                    $start_page = max(1, $current_page - 2);
+                    $end_page = min($total_pages, $current_page + 2);
+                    
+                    if($start_page > 1): ?>
+                        <span>...</span>
+                    <?php endif;
+                    
+                    for($p = $start_page; $p <= $end_page; $p++): 
+                        if($p == $current_page): ?>
+                            <span class="active"><?php echo $p; ?></span>
+                        <?php else: ?>
+                            <a href="index.php?page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                        <?php endif;
+                    endfor;
+                    
+                    if($end_page < $total_pages): ?>
+                        <span>...</span>
+                    <?php endif; ?>
+
+                <!-- Next & Last -->
+                <?php if($current_page < $total_pages): ?>
+                    <a href="index.php?page=<?php echo $current_page + 1; ?>" title="Next Page">
+                        Next <i class="fas fa-angle-right"></i>
+                    </a>
+                    <a href="index.php?page=<?php echo $total_pages; ?>" title="Last Page">
+                        <i class="fas fa-angle-double-right"></i>
+                    </a>
+                <?php else: ?>
+                    <span class="disabled" title="Next Page">
+                        Next <i class="fas fa-angle-right"></i>
+                    </span>
+                    <span class="disabled" title="Last Page">
+                        <i class="fas fa-angle-double-right"></i>
+                    </span>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+
         </div>
     </main>
 
