@@ -330,13 +330,19 @@ if ($action === 'edit' && isset($_GET['id'])) {
                 <!-- Table Area -->
                 <div>
                     <div class="card">
+        <div class="p-4" style="border-bottom: 1px solid var(--border-color); background-color: var(--surface-hover); display: flex; gap: 1rem; align-items: center;">
+            <div style="flex: 1; max-width: 500px;">
+                <input type="text" id="medicineSearch" class="form-control" placeholder="Search medicines by name..." style="margin: 0;">
+            </div>
+            <span id="searchResultsCount" class="text-sm text-muted">Showing all medicines</span>
+        </div>
                         <!-- Page Info -->
                         <div class="page-info">
                             Showing <?php echo ($medicines ? $offset + 1 : 0); ?> to <?php echo min($offset + $items_per_page, $total_medicines); ?> of <?php echo $total_medicines; ?> medicines
                         </div>
 
                         <div class="table-responsive">
-                            <table class="table">
+                            <table class="table" id="medicinesTable">
                                 <thead>
                                     <tr>
                                         <th class="sortable" data-sort="id" style="cursor: pointer;"><i class="fas fa-sort mr-1"></i> ID</th>
@@ -477,6 +483,38 @@ if ($action === 'edit' && isset($_GET['id'])) {
                     .sort(comparer(Array.from(th.parentNode.children).indexOf(th), this.asc = !this.asc))
                     .forEach(tr => table.appendChild(tr));
             })));
+        });
+
+                
+        document.addEventListener('DOMContentLoaded', () => {
+            const medicineSearch = document.getElementById('medicineSearch');
+            const searchResultsCount = document.getElementById('searchResultsCount');
+            const medicineRows = document.querySelectorAll('#medicinesTable tbody tr');
+
+            medicineSearch.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase().trim();
+                let visibleCount = 0;
+
+                medicineRows.forEach(row => {
+                    // Get medicine name from the Name column (index 1)
+                    const nameCell = row.querySelector('td:nth-child(2)');
+                    const medicineName = nameCell ? nameCell.textContent.toLowerCase() : '';
+                    
+                    if (query === '' || medicineName.includes(query)) {
+                        row.style.display = '';
+                        visibleCount++;
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+
+                // Update results count
+                if (query === '') {
+                    searchResultsCount.textContent = 'Showing all medicines';
+                } else {
+                    searchResultsCount.textContent = `Found ${visibleCount} medicine(s)`;
+                }
+            });
         });
     </script>
 </body>
