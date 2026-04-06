@@ -3,48 +3,44 @@
 require_once 'config.php';
 require_once 'auth.php';
 
-// REDIRECT IF ALREADY LOGGED IN: If an admin/supervisor somehow visits this login page, 
-// just bounce them straight to their dashboard so they don't have to re-login.
+// REDIRECT IF ALREADY LOGGED IN
 if (isLoggedIn()) {
     if (hasRole('admin')) header("Location: admin/dashboard.php");
     else header("Location: supervisor/dashboard.php");
     exit;
 }
 
-$error = ''; // Initialize empty error string
+$error = '';
 
-// CHECK FORM SUBMISSION: Only run this logic if the user clicked "Sign in" (POST method)
+// CHECK FORM SUBMISSION
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Sanitize input: Trim extra whitespaces
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    // Basic Validation: Ensure fields aren't blank
     if ($username && $password) {
         
-        // PREPARED STATEMENT: We query the database for this specific username and role ('admin')
-        // Using '?' prevents malicious users from injecting SQL commands directly into the query.
-        $stmt = $pdo->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ? AND role = 'admin'");
+        // PREPARED STATEMENT: Query for admin user with password_hash column
+        // This fetches the BCRYPT hash stored in database
+        $stmt = $pdo->prepare("SELECT id, username, password_hash, role FROM users WHERE username = ? AND role = 'admin' LIMIT 1");
         $stmt->execute([$username]);
         
-        // Fetch the user row as an Associative Array mapping column names to values
+        // Fetch the user record
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // PASSWORD VERIFICATION: 
-        // We do NOT store passwords in plain text. We hash them using mathematically secure Bcrypt.
-        // password_verify() computes the hash of the typed password and compares it to the stored Hash.
+        // PASSWORD VERIFICATION using password_verify()
+        // password_verify() compares plain text input against the stored BCRYPT hash
         if ($user && password_verify($password, $user['password_hash'])) {
             
-            // SUCCESSFUL LOGIN: Save user details into server-side session variables
+            // SUCCESSFUL LOGIN - Create session
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['role'] = $user['role'];
             $_SESSION['username'] = $user['username'];
             
-            // Route the authenticated user directly into the management panel
+            // Redirect to admin dashboard
             header("Location: admin/dashboard.php");
             exit;
         } else {
-            // Failed login due to wrong username or password
+            // Failed login - either user doesn't exist or password is wrong
             $error = 'Invalid admin credentials.';
         }
     } else {
