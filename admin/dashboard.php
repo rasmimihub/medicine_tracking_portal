@@ -5,7 +5,74 @@ require_once '../auth.php';
 
 // ENFORCE SECURITY: Check if user is logged in AND holds the 'admin' execution role.
 requireRole('admin');
+// Fetch current user details
+$stmt = $pdo->prepare("SELECT id, username, role FROM users WHERE id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$current_user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+// SECURE PASSWORD CHANGE HANDLER - ADMIN ONLY
+$password_message = '';
+$password_error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
+    $old_password = $_POST['old_password'] ?? '';
+    $new_password = $_POST['new_password'] ?? '';
+    $confirm_password = $_POST['confirm_password'] ?? '';
+    $user_id = $_SESSION['user_id'];
+    
+    // INPUT VALIDATION
+    if (empty($old_password) || empty($new_password) || empty($confirm_password)) {
+        $password_error = 'All fields are required.';
+    } elseif ($new_password !== $confirm_password) {
+        $password_error = 'New passwords do not match.';
+    } elseif (strlen($new_password) < 6) {
+        $password_error = 'Password must be at least 6 characters long.';
+    } elseif (!preg_match('/[A-Z]/', $new_password) || !preg_match('/[a-z]/', $new_password) || !preg_match('/[0-9]/', $new_password)) {
+        $password_error = 'Password must contain uppercase, lowercase, and numbers.';
+    } else {
+        // FETCH current hash from database
+        $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ? LIMIT 1");
+        $stmt->execute([$user_id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        // VERIFY old password against stored hash
+        if (!$user || !password_verify($old_password, $user['password_hash'])) {
+            $password_error = 'Current password is incorrect.';
+        } elseif (password_verify($new_password, $user['password_hash'])) {
+            $password_error = 'New password cannot be the same as current password.';
+        } else {
+            // HASH new password using PASSWORD_BCRYPT
+            $new_password_hash = password_hash($new_password, PASSWORD_BCRYPT);
+            
+            // UPDATE ONLY users table - NO transaction logging
+            $stmt = $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
+            
+            if ($stmt->execute([$new_password_hash, $user_id])) {
+                // VERIFY update was successful
+                $verify_stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ? LIMIT 1");
+                $verify_stmt->execute([$user_id]);
+                $updated_user = $verify_stmt->fetch(PDO::FETCH_ASSOC);
+                
+                // CONFIRM new password works
+                if ($updated_user && password_verify($new_password, $updated_user['password_hash'])) {
+                    // DESTROY session - force re-login with new password
+                    session_destroy();
+                    $password_message = 'Password changed successfully! Please login with your new password.';
+                    
+                    echo '<script>
+                        setTimeout(function() {
+                            window.location.href = "../admin_login.php";
+                        }, 3000);
+                    </script>';
+                } else {
+                    $password_error = 'Password verification failed. Please try again.';
+                }
+            } else {
+                $password_error = 'Failed to update password. Please try again.';
+            }
+        }
+    }
+}
 // Handle Clear Stock logic for Expired Items
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'clear_stock') {
     $id = intval($_POST['id']);
@@ -62,7 +129,7 @@ $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <span>Medicine Tracking Portal</span>
             </div>
         </div>
-        <nav class="sidebar-nav">
+               <nav class="sidebar-nav">
             <a href="dashboard.php" class="sidebar-link active">
                 <i class="fas fa-home"></i>
                 <span>Dashboard</span>
@@ -70,6 +137,10 @@ $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <a href="medicines.php" class="sidebar-link">
                 <i class="fas fa-box"></i>
                 <span>Manage Medicines</span>
+            </a>
+            <a href="#changePasswordModal" class="sidebar-link" onclick="openChangePasswordModal(event)">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
             </a>
             <a href="../logout.php" class="sidebar-link" style="margin-top: 2rem; color: var(--danger);">
                 <i class="fas fa-sign-out-alt"></i>
@@ -197,6 +268,123 @@ $expired = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
         </div>
     </main>
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background-color: white; border-radius: 8px; width: 90%; max-width: 500px; padding: 2rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+            <button onclick="closeChangePasswordModal()" style="float: right; background: none; border: none; font-size: 1.5rem; cursor: pointer;">×</button>
+            
+            <h2 style="margin-top: 0; margin-bottom: 1.5rem;"><i class="fas fa-lock mr-2"></i>Change Password</h2>
+            
+            <?php if($password_message): ?>
+            <div style="background-color: #ECFDF5; color: #065F46; border: 1px solid #34D399; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                <i class="fas fa-check-circle mr-2"></i><?php echo htmlspecialchars($password_message); ?>
+            </div>
+            <?php endif; ?>
+            
+            <?php if($password_error): ?>
+            <div style="background-color: #FEF2F2; color: #991B1B; border: 1px solid #F87171; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                <i class="fas fa-exclamation-circle mr-2"></i><?php echo htmlspecialchars($password_error); ?>
+            </div>
+            <?php endif; ?>
+            
+            <form method="POST" action="dashboard.php">
+                <input type="hidden" name="change_password" value="1">
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">Current Password</label>
+                    <input type="password" name="old_password" required style="width: 100%; padding: 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 1rem; box-sizing: border-box;">
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">New Password</label>
+                    <input type="password" id="adminNewPassword" name="new_password" required oninput="checkAdminPasswordStrength()" style="width: 100%; padding: 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 1rem; box-sizing: border-box;">
+                    <div id="adminPasswordStrength" style="height: 6px; border-radius: 3px; margin-top: 0.5rem; background-color: #E5E7EB;"></div>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 0.5rem;">Confirm New Password</label>
+                    <input type="password" id="adminConfirmPassword" name="confirm_password" required oninput="checkAdminPasswordStrength()" style="width: 100%; padding: 0.75rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 1rem; box-sizing: border-box;">
+                </div>
+                
+                <div style="background-color: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; font-size: 0.875rem;">
+                    <div id="adminReq-length" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; color: #9CA3AF;"><i class="fas fa-circle"></i><span>At least 6 characters</span></div>
+                    <div id="adminReq-upper" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; color: #9CA3AF;"><i class="fas fa-circle"></i><span>Uppercase (A-Z)</span></div>
+                    <div id="adminReq-lower" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; color: #9CA3AF;"><i class="fas fa-circle"></i><span>Lowercase (a-z)</span></div>
+                    <div id="adminReq-number" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; color: #9CA3AF;"><i class="fas fa-circle"></i><span>Number (0-9)</span></div>
+                    <div id="adminReq-match" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; color: #9CA3AF;"><i class="fas fa-circle"></i><span>Passwords match</span></div>
+                </div>
+                
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" style="flex: 1; padding: 0.75rem; background-color: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">Update Password</button>
+                    <button type="button" onclick="closeChangePasswordModal()" style="flex: 1; padding: 0.75rem; background-color: #E5E7EB; color: #1F2937; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
+    <script>
+        function openChangePasswordModal(e) {
+            if(e) e.preventDefault();
+            document.getElementById('changePasswordModal').style.display = 'flex';
+        }
+        
+        function closeChangePasswordModal() {
+            document.getElementById('changePasswordModal').style.display = 'none';
+        }
+        
+        function checkAdminPasswordStrength() {
+            const newPassword = document.getElementById('adminNewPassword').value;
+            const confirmPassword = document.getElementById('adminConfirmPassword').value;
+            
+            const length = newPassword.length >= 6;
+            const hasUpper = /[A-Z]/.test(newPassword);
+            const hasLower = /[a-z]/.test(newPassword);
+            const hasNumber = /[0-9]/.test(newPassword);
+            const matches = newPassword === confirmPassword && newPassword.length > 0;
+            
+            updateAdminRequirement('adminReq-length', length);
+            updateAdminRequirement('adminReq-upper', hasUpper);
+            updateAdminRequirement('adminReq-lower', hasLower);
+            updateAdminRequirement('adminReq-number', hasNumber);
+            updateAdminRequirement('adminReq-match', matches);
+            
+            let strength = 0;
+            if (length) strength++;
+            if (hasUpper) strength++;
+            if (hasLower) strength++;
+            if (hasNumber) strength++;
+            
+            const strengthBar = document.getElementById('adminPasswordStrength');
+            strengthBar.style.width = '0%';
+            
+            if (newPassword.length > 0) {
+                if (strength <= 2) {
+                    strengthBar.style.backgroundColor = '#EF4444';
+                    strengthBar.style.width = '33%';
+                } else if (strength === 3) {
+                    strengthBar.style.backgroundColor = '#F59E0B';
+                    strengthBar.style.width = '66%';
+                } else {
+                    strengthBar.style.backgroundColor = '#10B981';
+                    strengthBar.style.width = '100%';
+                }
+            }
+        }
+        
+        function updateAdminRequirement(id, met) {
+            const element = document.getElementById(id);
+            if (met) {
+                element.style.color = '#10B981';
+                element.querySelector('i').className = 'fas fa-check-circle';
+            } else {
+                element.style.color = '#9CA3AF';
+                element.querySelector('i').className = 'fas fa-circle';
+            }
+        }
+
+        document.getElementById('changePasswordModal').addEventListener('click', function(e) {
+            if(e.target === this) closeChangePasswordModal();
+        });
+    </script>
 </body>
 </html>
